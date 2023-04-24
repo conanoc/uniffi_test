@@ -1,0 +1,19 @@
+[package]
+name = "bug-finder"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+uniffi = { git = "https://github.com/mozilla/uniffi-rs.git", features = ["build", "cli", "tokio"] }
+
+[dependencies]
+tokio = { version = "1.5", features = ["time", "macros", "sync"] }
+uniffi = { git = "https://github.com/mozilla/uniffi-rs.git", features = ["build", "cli", "tokio"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "./uniffi/uniffi-bindgen.rs"
+
+[lib]
+name = "bug_finder"
+crate-type = ["cdylib", "staticlib"]

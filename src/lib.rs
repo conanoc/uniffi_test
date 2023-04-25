@@ -35,11 +35,17 @@ pub async fn add_async_normal(left: u8, right: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_lite::future;
 
-    #[tokio::test]
-    async fn async_test() {
+    #[test]
+    fn async_test() {
         println!("waiting for add...");
-        let result = add_async(2, 2).await;
-        assert_eq!(result, 4);
+        future::block_on(async_compat::Compat::new(
+            async {
+                let result = add_async(2, 2).await;
+                assert_eq!(result, 4);
+            }
+        ));
+        println!("add done");
     }
 }

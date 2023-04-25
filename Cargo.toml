@@ -9,6 +9,8 @@ uniffi = { git = "https://github.com/mozilla/uniffi-rs.git", features = ["build"
 [dependencies]
 tokio = { version = "1.5", features = ["time", "macros", "sync"] }
 uniffi = { git = "https://github.com/mozilla/uniffi-rs.git", features = ["build", "cli", "tokio"] }
+async-compat = { version = "0.2.1" }
+futures-lite = "1.11"
 
 [[bin]]
 name = "uniffi-bindgen"

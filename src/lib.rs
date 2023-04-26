@@ -41,9 +41,9 @@ pub async fn create_store() -> Arc<Store> {
         .connect_with(conn_opts)
         .await
         .unwrap();
-    let result = sqlx::query("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY NOT NULL, name VARCHAR(250) NOT NULL);")
-                    .execute(&pool).await.unwrap();
-    println!("Create table result: {:?}", result);
+    // let result = sqlx::query("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY NOT NULL, name VARCHAR(250) NOT NULL);")
+    //                 .execute(&pool).await.unwrap();
+    // println!("Create table result: {:?}", result);
     Arc::new(Store { pool: RwLock::new(Some(pool)) })
 }
 

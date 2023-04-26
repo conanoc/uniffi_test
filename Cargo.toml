@@ -12,6 +12,11 @@ uniffi = { git = "https://github.com/mozilla/uniffi-rs.git", features = ["build"
 async-compat = { version = "0.2.1" }
 futures-lite = "1.11"
 
+[dependencies.sqlx]
+version = "0.5.13"
+default-features = false
+features = ["chrono", "runtime-tokio-rustls", "sqlite", "migrate"]
+
 [[bin]]
 name = "uniffi-bindgen"
 path = "./uniffi/uniffi-bindgen.rs"

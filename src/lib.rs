@@ -1,35 +1,72 @@
-use std::thread;
-use std::sync::mpsc::channel;
-use tokio::runtime::Handle;
+use tokio::sync::RwLock;
+use std::{ sync::Arc, time::Duration, str::FromStr };
+use sqlx::{
+    sqlite::{
+        SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqliteLockingMode,
+        SqlitePoolOptions, SqliteSynchronous,
+    },
+    migrate::MigrateDatabase, Sqlite, SqlitePool,
+};
 
 uniffi::include_scaffolding!("bug_finder");
 
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn add_async(left: u8, right: u8) -> u8 {
-    let (to_thread_tx, to_thread_rx) = channel();
-    let (from_thread_tx, from_thread_rx) = channel();
-    let handle = Handle::current();
+const DB_URL: &str = "sqlite:///tmp/test.db";
 
-    println!("spawning thread...");
-    thread::spawn( move || {
-        println!("thread: spawned");
-        handle.block_on(async {
-            println!("timer waiting...");
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            println!("channel waiting...");
-            let _ = to_thread_rx.recv().unwrap();
-            from_thread_tx.send(0).unwrap();
-        });
-    });
-    to_thread_tx.send(0).unwrap();
-    let _ = from_thread_rx.recv().unwrap();
-    left + right
+pub struct Store {
+    pool: RwLock<Option<SqlitePool>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-pub async fn add_async_normal(left: u8, right: u8) -> u8 {
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    left + right
+pub async fn create_store() -> Arc<Store> {
+    if !Sqlite::database_exists(DB_URL).await.unwrap_or(false) {
+        match Sqlite::create_database(DB_URL).await {
+            Ok(_) => println!("Create db success"),
+            Err(error) => panic!("error: {}", error),
+        }
+    } else {
+        println!("Database already exists");
+    }
+    let conn_opts = SqliteConnectOptions::from_str(DB_URL).unwrap()
+        .create_if_missing(true)
+        .auto_vacuum(SqliteAutoVacuum::Incremental)
+        .busy_timeout(Duration::from_secs(5))
+        .journal_mode(SqliteJournalMode::Wal)
+        .locking_mode(SqliteLockingMode::Normal)
+        .shared_cache(true)
+        .synchronous(SqliteSynchronous::Full);
+    let pool = SqlitePoolOptions::default()
+        .min_connections(1)
+        .max_connections(4)
+        .test_before_acquire(false)
+        .connect_with(conn_opts)
+        .await
+        .unwrap();
+    let result = sqlx::query("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY NOT NULL, name VARCHAR(250) NOT NULL);")
+                    .execute(&pool).await.unwrap();
+    println!("Create table result: {:?}", result);
+    Arc::new(Store { pool: RwLock::new(Some(pool)) })
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl Store {
+    pub async fn count(&self) -> u32 {
+        println!("In count");
+        let pool = self.pool.read().await;
+        let mut conn = pool.as_ref().unwrap().acquire().await.unwrap();
+        let count: u32 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        count
+    }
+
+    pub async fn close(&self) {
+        println!("In close");
+        let pool = self.pool.write().await.take();
+        println!("before close");
+        pool.unwrap().close().await;
+        println!("after close");
+    }
 }
 
 #[cfg(test)]
@@ -38,14 +75,12 @@ mod tests {
     use futures_lite::future;
 
     #[test]
-    fn async_test() {
-        println!("waiting for add...");
-        future::block_on(async_compat::Compat::new(
-            async {
-                let result = add_async(2, 2).await;
-                assert_eq!(result, 4);
-            }
-        ));
-        println!("add done");
+    fn close_test() {
+        future::block_on(async_compat::Compat::new(async {
+            let store = create_store().await;
+            let count = store.count().await;
+            println!("count: {}", count);
+            store.close().await;
+        }));
     }
 }

@@ -1,1 +1,3 @@
+interface Store {};
+
 namespace bug_finder {};

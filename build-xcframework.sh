@@ -4,7 +4,10 @@ set -e
 
 cargo build
 cargo run --bin uniffi-bindgen generate uniffi/bug_finder.udl --language swift -o out --lib-file target/debug/libbug_finder.dylib
+
+sed -i '' 's/ void \* _Nonnull/UnsafeMutableRawPointer/g' out/bug_finder.swift
 cp out/bug_finder.swift swift/BugFinder/Sources/BugFinder/
+
 mkdir -p out/include
 cp out/bug_finderFFI.h out/include/bug_finderFFI.h
 cp out/bug_finderFFI.modulemap out/include/module.modulemap

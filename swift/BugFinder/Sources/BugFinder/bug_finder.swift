@@ -281,15 +281,15 @@ private func makeRustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) 
 
 // Public interface members begin here.
 
-private struct FfiConverterUInt8: FfiConverterPrimitive {
-    typealias FfiType = UInt8
-    typealias SwiftType = UInt8
+private struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
         return try lift(readInt(&buf))
     }
 
-    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -332,32 +332,76 @@ private struct FfiConverterString: FfiConverter {
     }
 }
 
-private class _UniFFI_AddAsync_Env {
-    var rustFuture: OpaquePointer
-    var continuation: CheckedContinuation<UInt8, Never>
+public protocol StoreProtocol {
+    func close() async
+    func count() async -> UInt32
+}
 
-    init(rustyFuture: OpaquePointer, continuation: CheckedContinuation<UInt8, Never>) {
+public class Store: StoreProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    deinit {
+        try! rustCall { uniffi_bug_finder_fn_free_store(pointer, $0) }
+    }
+
+    public func close() async {
+        let future = try!
+            rustCall {
+                uniffi_bug_finder_fn_method_store_close(self.pointer, $0)
+            }
+
+        return await withCheckedContinuation { continuation in
+            let env = Unmanaged.passRetained(_UniFFI_Store_Close_Env(rustyFuture: future, continuation: continuation))
+            _UniFFI_Store_Close_waker(raw_env: env.toOpaque())
+        }
+    }
+
+    public func count() async -> UInt32 {
+        let future = try!
+            rustCall {
+                uniffi_bug_finder_fn_method_store_count(self.pointer, $0)
+            }
+
+        return await withCheckedContinuation { continuation in
+            let env = Unmanaged.passRetained(_UniFFI_Store_Count_Env(rustyFuture: future, continuation: continuation))
+            _UniFFI_Store_Count_waker(raw_env: env.toOpaque())
+        }
+    }
+}
+
+private class _UniFFI_Store_Close_Env {
+    var rustFuture: OpaquePointer
+    var continuation: CheckedContinuation<Void, Never>
+
+    init(rustyFuture: OpaquePointer, continuation: CheckedContinuation<Void, Never>) {
         rustFuture = rustyFuture
         self.continuation = continuation
     }
 
     deinit {
         try! rustCall {
-            uniffi_bug_finder_fn_func_add_async_drop(self.rustFuture, $0)
+            uniffi_bug_finder_fn_method_store_close_drop(self.rustFuture, $0)
         }
     }
 }
 
-private func _UniFFI_AddAsync_waker(raw_env: UnsafeMutableRawPointer?) {
+private func _UniFFI_Store_Close_waker(raw_env: UnsafeMutableRawPointer?) {
     Task {
-        let env = Unmanaged<_UniFFI_AddAsync_Env>.fromOpaque(raw_env!)
+        let env = Unmanaged<_UniFFI_Store_Close_Env>.fromOpaque(raw_env!)
         let env_ref = env.takeUnretainedValue()
-        let polledResult = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        let polledResult = UnsafeMutableRawPointer.allocate(byteCount: 0, alignment: 0)
 
         let isReady = try! rustCall {
-            uniffi_bug_finder_fn_func_add_async_poll(
+            uniffi_bug_finder_fn_method_store_close_poll(
                 env_ref.rustFuture,
-                _UniFFI_AddAsync_waker,
+                _UniFFI_Store_Close_waker,
                 env.toOpaque(),
                 polledResult,
                 $0
@@ -365,53 +409,39 @@ private func _UniFFI_AddAsync_waker(raw_env: UnsafeMutableRawPointer?) {
         }
 
         if isReady {
-            env_ref.continuation.resume(returning: try! FfiConverterUInt8.lift(polledResult.move()))
+            env_ref.continuation.resume(returning: ())
             polledResult.deallocate()
             env.release()
         }
     }
 }
 
-public func addAsync(left: UInt8, right: UInt8) async -> UInt8 {
-    let future = try! rustCall {
-        uniffi_bug_finder_fn_func_add_async(
-            FfiConverterUInt8.lower(left),
-            FfiConverterUInt8.lower(right), $0
-        )
-    }
-
-    return await withCheckedContinuation { continuation in
-        let env = Unmanaged.passRetained(_UniFFI_AddAsync_Env(rustyFuture: future, continuation: continuation))
-        _UniFFI_AddAsync_waker(raw_env: env.toOpaque())
-    }
-}
-
-private class _UniFFI_AddAsyncNormal_Env {
+private class _UniFFI_Store_Count_Env {
     var rustFuture: OpaquePointer
-    var continuation: CheckedContinuation<UInt8, Never>
+    var continuation: CheckedContinuation<UInt32, Never>
 
-    init(rustyFuture: OpaquePointer, continuation: CheckedContinuation<UInt8, Never>) {
+    init(rustyFuture: OpaquePointer, continuation: CheckedContinuation<UInt32, Never>) {
         rustFuture = rustyFuture
         self.continuation = continuation
     }
 
     deinit {
         try! rustCall {
-            uniffi_bug_finder_fn_func_add_async_normal_drop(self.rustFuture, $0)
+            uniffi_bug_finder_fn_method_store_count_drop(self.rustFuture, $0)
         }
     }
 }
 
-private func _UniFFI_AddAsyncNormal_waker(raw_env: UnsafeMutableRawPointer?) {
+private func _UniFFI_Store_Count_waker(raw_env: UnsafeMutableRawPointer?) {
     Task {
-        let env = Unmanaged<_UniFFI_AddAsyncNormal_Env>.fromOpaque(raw_env!)
+        let env = Unmanaged<_UniFFI_Store_Count_Env>.fromOpaque(raw_env!)
         let env_ref = env.takeUnretainedValue()
-        let polledResult = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        let polledResult = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
 
         let isReady = try! rustCall {
-            uniffi_bug_finder_fn_func_add_async_normal_poll(
+            uniffi_bug_finder_fn_method_store_count_poll(
                 env_ref.rustFuture,
-                _UniFFI_AddAsyncNormal_waker,
+                _UniFFI_Store_Count_waker,
                 env.toOpaque(),
                 polledResult,
                 $0
@@ -419,24 +449,99 @@ private func _UniFFI_AddAsyncNormal_waker(raw_env: UnsafeMutableRawPointer?) {
         }
 
         if isReady {
-            env_ref.continuation.resume(returning: try! FfiConverterUInt8.lift(polledResult.move()))
+            env_ref.continuation.resume(returning: try! FfiConverterUInt32.lift(polledResult.move()))
             polledResult.deallocate()
             env.release()
         }
     }
 }
 
-public func addAsyncNormal(left: UInt8, right: UInt8) async -> UInt8 {
+public struct FfiConverterTypeStore: FfiConverter {
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = Store
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Store {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if ptr == nil {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: Store, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Store {
+        return Store(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: Store) -> UnsafeMutableRawPointer {
+        return value.pointer
+    }
+}
+
+public func FfiConverterTypeStore_lift(_ pointer: UnsafeMutableRawPointer) throws -> Store {
+    return try FfiConverterTypeStore.lift(pointer)
+}
+
+public func FfiConverterTypeStore_lower(_ value: Store) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeStore.lower(value)
+}
+
+private class _UniFFI_CreateStore_Env {
+    var rustFuture: OpaquePointer
+    var continuation: CheckedContinuation<Store, Never>
+
+    init(rustyFuture: OpaquePointer, continuation: CheckedContinuation<Store, Never>) {
+        rustFuture = rustyFuture
+        self.continuation = continuation
+    }
+
+    deinit {
+        try! rustCall {
+            uniffi_bug_finder_fn_func_create_store_drop(self.rustFuture, $0)
+        }
+    }
+}
+
+private func _UniFFI_CreateStore_waker(raw_env: UnsafeMutableRawPointer?) {
+    Task {
+        let env = Unmanaged<_UniFFI_CreateStore_Env>.fromOpaque(raw_env!)
+        let env_ref = env.takeUnretainedValue()
+        let polledResult = UnsafeMutablePointer <UnsafeMutableRawPointer>.allocate(capacity: 1)
+
+        let isReady = try! rustCall {
+            uniffi_bug_finder_fn_func_create_store_poll(
+                env_ref.rustFuture,
+                _UniFFI_CreateStore_waker,
+                env.toOpaque(),
+                polledResult,
+                $0
+            )
+        }
+
+        if isReady {
+            env_ref.continuation.resume(returning: try! FfiConverterTypeStore.lift(polledResult.move()))
+            polledResult.deallocate()
+            env.release()
+        }
+    }
+}
+
+public func createStore() async -> Store {
     let future = try! rustCall {
-        uniffi_bug_finder_fn_func_add_async_normal(
-            FfiConverterUInt8.lower(left),
-            FfiConverterUInt8.lower(right), $0
-        )
+        uniffi_bug_finder_fn_func_create_store($0)
     }
 
     return await withCheckedContinuation { continuation in
-        let env = Unmanaged.passRetained(_UniFFI_AddAsyncNormal_Env(rustyFuture: future, continuation: continuation))
-        _UniFFI_AddAsyncNormal_waker(raw_env: env.toOpaque())
+        let env = Unmanaged.passRetained(_UniFFI_CreateStore_Env(rustyFuture: future, continuation: continuation))
+        _UniFFI_CreateStore_waker(raw_env: env.toOpaque())
     }
 }
 
@@ -456,10 +561,13 @@ private var checkVersionResult: CheckVersionResult {
     if bindings_contract_version != scaffolding_contract_version {
         return CheckVersionResult.contractVersionMismatch
     }
-    if uniffi_bug_finder_checksum_func_add_async() != 1339 {
+    if uniffi_bug_finder_checksum_func_create_store() != 50804 {
         return CheckVersionResult.apiChecksumMismatch
     }
-    if uniffi_bug_finder_checksum_func_add_async_normal() != 12933 {
+    if uniffi_bug_finder_checksum_method_store_close() != 19216 {
+        return CheckVersionResult.apiChecksumMismatch
+    }
+    if uniffi_bug_finder_checksum_method_store_count() != 46326 {
         return CheckVersionResult.apiChecksumMismatch
     }
     return CheckVersionResult.ok

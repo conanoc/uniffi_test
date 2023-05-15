@@ -1,3 +1,4 @@
 interface Store {};
+interface Session {};
 
 namespace bug_finder {};

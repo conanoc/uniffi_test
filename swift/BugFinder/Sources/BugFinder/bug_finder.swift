@@ -239,29 +239,42 @@ private extension RustCallStatus {
 }
 
 private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
-    try makeRustCall(callback, errorHandler: {
-        $0.deallocate()
-        return UniffiInternalError.unexpectedRustCallError
-    })
+    try makeRustCall(callback, errorHandler: nil)
 }
 
-private func rustCallWithError<T, F: FfiConverter>
-(_ errorFfiConverter: F.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T
-    where F.SwiftType: Error, F.FfiType == RustBuffer
-{
-    try makeRustCall(callback, errorHandler: { try errorFfiConverter.lift($0) })
+private func rustCallWithError<T>(
+    _ errorHandler: @escaping (RustBuffer) throws -> Error,
+    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
+) throws -> T {
+    try makeRustCall(callback, errorHandler: errorHandler)
 }
 
-private func makeRustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T, errorHandler: (RustBuffer) throws -> Error) throws -> T {
-    uniffiCheckFfiVersionMismatch()
+private func makeRustCall<T>(
+    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
+    errorHandler: ((RustBuffer) throws -> Error)?
+) throws -> T {
+    uniffiEnsureInitialized()
     var callStatus = RustCallStatus()
     let returnedVal = callback(&callStatus)
+    try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
+    return returnedVal
+}
+
+private func uniffiCheckCallStatus(
+    callStatus: RustCallStatus,
+    errorHandler: ((RustBuffer) throws -> Error)?
+) throws {
     switch callStatus.code {
     case CALL_SUCCESS:
-        return returnedVal
+        return
 
     case CALL_ERROR:
-        throw try errorHandler(callStatus.errorBuf)
+        if let errorHandler = errorHandler {
+            throw try errorHandler(callStatus.errorBuf)
+        } else {
+            callStatus.errorBuf.deallocate()
+            throw UniffiInternalError.unexpectedRustCallError
+        }
 
     case CALL_PANIC:
         // When the rust code sees a panic, it tries to construct a RustBuffer
@@ -352,106 +365,46 @@ public class Store: StoreProtocol {
     }
 
     public func close() async {
-        let future = try!
-            rustCall {
-                uniffi_bug_finder_fn_method_store_close(self.pointer, $0)
-            }
+        // Suspend the function and call the scaffolding function, passing it a callback handler from
+        // `AsyncTypes.swift`
+        //
+        // Make sure to hold on to a reference to the continuation in the top-level scope so that
+        // it's not freed before the callback is invoked.
+        var continuation: CheckedContinuation<Void, Error>? = nil
+        return try! await withCheckedThrowingContinuation {
+            continuation = $0
+            try! rustCall {
+                uniffi_bug_finder_fn_method_store_close(
+                    self.pointer,
 
-        return await withCheckedContinuation { continuation in
-            let env = Unmanaged.passRetained(_UniFFI_Store_Close_Env(rustyFuture: future, continuation: continuation))
-            _UniFFI_Store_Close_waker(raw_env: env.toOpaque())
+                    FfiConverterForeignExecutor.lower(UniFfiForeignExecutor()),
+                    uniffiFutureCallbackHandlerVoid,
+                    &continuation,
+                    $0
+                )
+            }
         }
     }
 
     public func count() async -> UInt32 {
-        let future = try!
-            rustCall {
-                uniffi_bug_finder_fn_method_store_count(self.pointer, $0)
+        // Suspend the function and call the scaffolding function, passing it a callback handler from
+        // `AsyncTypes.swift`
+        //
+        // Make sure to hold on to a reference to the continuation in the top-level scope so that
+        // it's not freed before the callback is invoked.
+        var continuation: CheckedContinuation<UInt32, Error>? = nil
+        return try! await withCheckedThrowingContinuation {
+            continuation = $0
+            try! rustCall {
+                uniffi_bug_finder_fn_method_store_count(
+                    self.pointer,
+
+                    FfiConverterForeignExecutor.lower(UniFfiForeignExecutor()),
+                    uniffiFutureCallbackHandleru32,
+                    &continuation,
+                    $0
+                )
             }
-
-        return await withCheckedContinuation { continuation in
-            let env = Unmanaged.passRetained(_UniFFI_Store_Count_Env(rustyFuture: future, continuation: continuation))
-            _UniFFI_Store_Count_waker(raw_env: env.toOpaque())
-        }
-    }
-}
-
-private class _UniFFI_Store_Close_Env {
-    var rustFuture: OpaquePointer
-    var continuation: CheckedContinuation<Void, Never>
-
-    init(rustyFuture: OpaquePointer, continuation: CheckedContinuation<Void, Never>) {
-        rustFuture = rustyFuture
-        self.continuation = continuation
-    }
-
-    deinit {
-        try! rustCall {
-            uniffi_bug_finder_fn_method_store_close_drop(self.rustFuture, $0)
-        }
-    }
-}
-
-private func _UniFFI_Store_Close_waker(raw_env: UnsafeMutableRawPointer?) {
-    Task {
-        let env = Unmanaged<_UniFFI_Store_Close_Env>.fromOpaque(raw_env!)
-        let env_ref = env.takeUnretainedValue()
-        let polledResult = UnsafeMutableRawPointer.allocate(byteCount: 0, alignment: 0)
-
-        let isReady = try! rustCall {
-            uniffi_bug_finder_fn_method_store_close_poll(
-                env_ref.rustFuture,
-                _UniFFI_Store_Close_waker,
-                env.toOpaque(),
-                polledResult,
-                $0
-            )
-        }
-
-        if isReady {
-            env_ref.continuation.resume(returning: ())
-            polledResult.deallocate()
-            env.release()
-        }
-    }
-}
-
-private class _UniFFI_Store_Count_Env {
-    var rustFuture: OpaquePointer
-    var continuation: CheckedContinuation<UInt32, Never>
-
-    init(rustyFuture: OpaquePointer, continuation: CheckedContinuation<UInt32, Never>) {
-        rustFuture = rustyFuture
-        self.continuation = continuation
-    }
-
-    deinit {
-        try! rustCall {
-            uniffi_bug_finder_fn_method_store_count_drop(self.rustFuture, $0)
-        }
-    }
-}
-
-private func _UniFFI_Store_Count_waker(raw_env: UnsafeMutableRawPointer?) {
-    Task {
-        let env = Unmanaged<_UniFFI_Store_Count_Env>.fromOpaque(raw_env!)
-        let env_ref = env.takeUnretainedValue()
-        let polledResult = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
-
-        let isReady = try! rustCall {
-            uniffi_bug_finder_fn_method_store_count_poll(
-                env_ref.rustFuture,
-                _UniFFI_Store_Count_waker,
-                env.toOpaque(),
-                polledResult,
-                $0
-            )
-        }
-
-        if isReady {
-            env_ref.continuation.resume(returning: try! FfiConverterUInt32.lift(polledResult.move()))
-            polledResult.deallocate()
-            env.release()
         }
     }
 }
@@ -494,58 +447,140 @@ public func FfiConverterTypeStore_lower(_ value: Store) -> UnsafeMutableRawPoint
     return FfiConverterTypeStore.lower(value)
 }
 
-private class _UniFFI_CreateStore_Env {
-    var rustFuture: OpaquePointer
-    var continuation: CheckedContinuation<Store, Never>
+// Encapsulates an executor that can run Rust tasks
+//
+// On Swift, `Task.detached` can handle this we just need to know what priority to send it.
+public struct UniFfiForeignExecutor {
+    var priority: TaskPriority
 
-    init(rustyFuture: OpaquePointer, continuation: CheckedContinuation<Store, Never>) {
-        rustFuture = rustyFuture
-        self.continuation = continuation
+    public init(priority: TaskPriority) {
+        self.priority = priority
     }
 
-    deinit {
-        try! rustCall {
-            uniffi_bug_finder_fn_func_create_store_drop(self.rustFuture, $0)
-        }
+    public init() {
+        priority = Task.currentPriority
     }
 }
 
-private func _UniFFI_CreateStore_waker(raw_env: UnsafeMutableRawPointer?) {
-    Task {
-        let env = Unmanaged<_UniFFI_CreateStore_Env>.fromOpaque(raw_env!)
-        let env_ref = env.takeUnretainedValue()
-        let polledResult = UnsafeMutablePointer <UnsafeMutableRawPointer>.allocate(capacity: 1)
+private struct FfiConverterForeignExecutor: FfiConverter {
+    typealias SwiftType = UniFfiForeignExecutor
+    // Rust uses a pointer to represent the FfiConverterForeignExecutor, but we only need a u8.
+    // let's use `Int`, which is equivalent to `size_t`
+    typealias FfiType = Int
 
-        let isReady = try! rustCall {
-            uniffi_bug_finder_fn_func_create_store_poll(
-                env_ref.rustFuture,
-                _UniFFI_CreateStore_waker,
-                env.toOpaque(),
-                polledResult,
-                $0
-            )
-        }
+    static func lift(_ value: FfiType) throws -> SwiftType {
+        UniFfiForeignExecutor(priority: TaskPriority(rawValue: numericCast(value)))
+    }
 
-        if isReady {
-            env_ref.continuation.resume(returning: try! FfiConverterTypeStore.lift(polledResult.move()))
-            polledResult.deallocate()
-            env.release()
+    static func lower(_ value: SwiftType) -> FfiType {
+        numericCast(value.priority.rawValue)
+    }
+
+    static func read(from _: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        fatalError("FfiConverterForeignExecutor.read not implemented yet")
+    }
+
+    static func write(_: SwiftType, into _: inout [UInt8]) {
+        fatalError("FfiConverterForeignExecutor.read not implemented yet")
+    }
+}
+
+private func uniffiForeignExecutorCallback(executorHandle: Int, delayMs: UInt32, rustTask: UniFfiRustTaskCallback?, taskData: UnsafeRawPointer?) {
+    if let rustTask = rustTask {
+        let executor = try! FfiConverterForeignExecutor.lift(executorHandle)
+        Task.detached(priority: executor.priority) {
+            if delayMs != 0 {
+                let nanoseconds: UInt64 = numericCast(delayMs * 1_000_000)
+                try! await Task.sleep(nanoseconds: nanoseconds)
+            }
+            rustTask(taskData)
         }
+    }
+    // No else branch: when rustTask is null, we should drop the foreign executor. However, since
+    // its just a value type, we don't need to do anything here.
+}
+
+private func uniffiInitForeignExecutor() {
+    uniffi_foreign_executor_callback_set(uniffiForeignExecutorCallback)
+} // Callbacks for async functions
+
+// Callback handlers for an async calls.  These are invoked by Rust when the future is ready.  They
+// lift the return value or error and resume the suspended function.
+private func uniffiFutureCallbackHandlerVoid(
+    rawContinutation: UnsafeRawPointer,
+    returnValue _: UInt8,
+    callStatus: RustCallStatus
+) {
+    let continuation = rawContinutation.bindMemory(
+        to: CheckedContinuation<Void, Error>.self,
+        capacity: 1
+    )
+
+    do {
+        try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: nil)
+        continuation.pointee.resume(returning: ())
+    } catch {
+        continuation.pointee.resume(throwing: error)
+    }
+}
+
+private func uniffiFutureCallbackHandleru32(
+    rawContinutation: UnsafeRawPointer,
+    returnValue: UInt32,
+    callStatus: RustCallStatus
+) {
+    let continuation = rawContinutation.bindMemory(
+        to: CheckedContinuation<UInt32, Error>.self,
+        capacity: 1
+    )
+
+    do {
+        try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: nil)
+        try continuation.pointee.resume(returning: FfiConverterUInt32.lift(returnValue))
+    } catch {
+        continuation.pointee.resume(throwing: error)
+    }
+}
+
+private func uniffiFutureCallbackHandlerTypeStore(
+    rawContinutation: UnsafeRawPointer,
+    returnValue: UnsafeMutableRawPointer,
+    callStatus: RustCallStatus
+) {
+    let continuation = rawContinutation.bindMemory(
+        to: CheckedContinuation<Store, Error>.self,
+        capacity: 1
+    )
+
+    do {
+        try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: nil)
+        try continuation.pointee.resume(returning: FfiConverterTypeStore.lift(returnValue))
+    } catch {
+        continuation.pointee.resume(throwing: error)
     }
 }
 
 public func createStore() async -> Store {
-    let future = try! rustCall {
-        uniffi_bug_finder_fn_func_create_store($0)
-    }
-
-    return await withCheckedContinuation { continuation in
-        let env = Unmanaged.passRetained(_UniFFI_CreateStore_Env(rustyFuture: future, continuation: continuation))
-        _UniFFI_CreateStore_waker(raw_env: env.toOpaque())
+    var continuation: CheckedContinuation<Store, Error>? = nil
+    // Suspend the function and call the scaffolding function, passing it a callback handler from
+    // `AsyncTypes.swift`
+    //
+    // Make sure to hold on to a reference to the continuation in the top-level scope so that
+    // it's not freed before the callback is invoked.
+    return try! await withCheckedThrowingContinuation {
+        continuation = $0
+        try! rustCall {
+            uniffi_bug_finder_fn_func_create_store(
+                FfiConverterForeignExecutor.lower(UniFfiForeignExecutor()),
+                uniffiFutureCallbackHandlerTypeStore,
+                &continuation,
+                $0
+            )
+        }
     }
 }
 
-private enum CheckVersionResult {
+private enum InitializationResult {
     case ok
     case contractVersionMismatch
     case apiChecksumMismatch
@@ -553,28 +588,30 @@ private enum CheckVersionResult {
 
 // Use a global variables to perform the versioning checks. Swift ensures that
 // the code inside is only computed once.
-private var checkVersionResult: CheckVersionResult {
+private var initializationResult: InitializationResult {
     // Get the bindings contract version from our ComponentInterface
     let bindings_contract_version = 22
     // Get the scaffolding contract version by calling the into the dylib
     let scaffolding_contract_version = ffi_bug_finder_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
-        return CheckVersionResult.contractVersionMismatch
+        return InitializationResult.contractVersionMismatch
     }
-    if uniffi_bug_finder_checksum_func_create_store() != 50804 {
-        return CheckVersionResult.apiChecksumMismatch
+    if uniffi_bug_finder_checksum_func_create_store() != 56625 {
+        return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_bug_finder_checksum_method_store_close() != 19216 {
-        return CheckVersionResult.apiChecksumMismatch
+    if uniffi_bug_finder_checksum_method_store_close() != 57737 {
+        return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_bug_finder_checksum_method_store_count() != 46326 {
-        return CheckVersionResult.apiChecksumMismatch
+    if uniffi_bug_finder_checksum_method_store_count() != 39287 {
+        return InitializationResult.apiChecksumMismatch
     }
-    return CheckVersionResult.ok
+
+    uniffiInitForeignExecutor()
+    return InitializationResult.ok
 }
 
-private func uniffiCheckFfiVersionMismatch() {
-    switch checkVersionResult {
+private func uniffiEnsureInitialized() {
+    switch initializationResult {
     case .ok:
         break
     case .contractVersionMismatch:

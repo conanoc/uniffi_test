@@ -6,5 +6,5 @@
 
 ## What happens?
 
-- `testStore()` in `BugFinderTests.swift` crashes at several points.
+- `testStore()` in `BugFinderTests.swift` hangs on `store.close()`.
 - `close_test()` in `src/lib.rs` works fine.

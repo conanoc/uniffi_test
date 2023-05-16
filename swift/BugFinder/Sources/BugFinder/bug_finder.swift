@@ -345,9 +345,88 @@ private struct FfiConverterString: FfiConverter {
     }
 }
 
+public protocol SessionProtocol {
+    func count() async -> UInt32
+}
+
+public class Session: SessionProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    deinit {
+        try! rustCall { uniffi_bug_finder_fn_free_session(pointer, $0) }
+    }
+
+    public func count() async -> UInt32 {
+        // Suspend the function and call the scaffolding function, passing it a callback handler from
+        // `AsyncTypes.swift`
+        //
+        // Make sure to hold on to a reference to the continuation in the top-level scope so that
+        // it's not freed before the callback is invoked.
+        var continuation: CheckedContinuation<UInt32, Error>? = nil
+        return try! await withCheckedThrowingContinuation {
+            continuation = $0
+            try! rustCall {
+                uniffi_bug_finder_fn_method_session_count(
+                    self.pointer,
+
+                    FfiConverterForeignExecutor.lower(UniFfiForeignExecutor()),
+                    uniffiFutureCallbackHandleru32,
+                    &continuation,
+                    $0
+                )
+            }
+        }
+    }
+}
+
+public struct FfiConverterTypeSession: FfiConverter {
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = Session
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Session {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if ptr == nil {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: Session, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Session {
+        return Session(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: Session) -> UnsafeMutableRawPointer {
+        return value.pointer
+    }
+}
+
+public func FfiConverterTypeSession_lift(_ pointer: UnsafeMutableRawPointer) throws -> Session {
+    return try FfiConverterTypeSession.lift(pointer)
+}
+
+public func FfiConverterTypeSession_lower(_ value: Session) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeSession.lower(value)
+}
+
 public protocol StoreProtocol {
     func close() async
-    func count() async -> UInt32
+    func session() async -> Session
 }
 
 public class Store: StoreProtocol {
@@ -386,21 +465,21 @@ public class Store: StoreProtocol {
         }
     }
 
-    public func count() async -> UInt32 {
+    public func session() async -> Session {
         // Suspend the function and call the scaffolding function, passing it a callback handler from
         // `AsyncTypes.swift`
         //
         // Make sure to hold on to a reference to the continuation in the top-level scope so that
         // it's not freed before the callback is invoked.
-        var continuation: CheckedContinuation<UInt32, Error>? = nil
+        var continuation: CheckedContinuation<Session, Error>? = nil
         return try! await withCheckedThrowingContinuation {
             continuation = $0
             try! rustCall {
-                uniffi_bug_finder_fn_method_store_count(
+                uniffi_bug_finder_fn_method_store_session(
                     self.pointer,
 
                     FfiConverterForeignExecutor.lower(UniFfiForeignExecutor()),
-                    uniffiFutureCallbackHandleru32,
+                    uniffiFutureCallbackHandlerTypeSession,
                     &continuation,
                     $0
                 )
@@ -542,6 +621,24 @@ private func uniffiFutureCallbackHandleru32(
     }
 }
 
+private func uniffiFutureCallbackHandlerTypeSession(
+    rawContinutation: UnsafeRawPointer,
+    returnValue: UnsafeMutableRawPointer,
+    callStatus: RustCallStatus
+) {
+    let continuation = rawContinutation.bindMemory(
+        to: CheckedContinuation<Session, Error>.self,
+        capacity: 1
+    )
+
+    do {
+        try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: nil)
+        try continuation.pointee.resume(returning: FfiConverterTypeSession.lift(returnValue))
+    } catch {
+        continuation.pointee.resume(throwing: error)
+    }
+}
+
 private func uniffiFutureCallbackHandlerTypeStore(
     rawContinutation: UnsafeRawPointer,
     returnValue: UnsafeMutableRawPointer,
@@ -602,7 +699,10 @@ private var initializationResult: InitializationResult {
     if uniffi_bug_finder_checksum_method_store_close() != 57737 {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_bug_finder_checksum_method_store_count() != 39287 {
+    if uniffi_bug_finder_checksum_method_store_session() != 48256 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_bug_finder_checksum_method_session_count() != 8307 {
         return InitializationResult.apiChecksumMismatch
     }
 

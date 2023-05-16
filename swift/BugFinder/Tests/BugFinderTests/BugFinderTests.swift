@@ -3,9 +3,13 @@ import XCTest
 
 final class BugFinderTests: XCTestCase {
     func testStore() async throws {
+        print("test starts")
         let store = await createStore()
-        let count = await store.count()
-        print("count: \(count)")
+        do {
+            let session = await store.session()
+            let count = await session.count()
+            print("count: \(count)")
+        }
         await store.close()
         print("store closed")
     }

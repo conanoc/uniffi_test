@@ -1,10 +1,6 @@
-use tokio::sync::RwLock;
-use std::{ sync::Arc, time::Duration, str::FromStr };
+use tokio::sync::{ RwLock, Mutex };
+use std::{ sync::Arc };
 use sqlx::{
-    sqlite::{
-        SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqliteLockingMode,
-        SqlitePoolOptions, SqliteSynchronous,
-    },
     migrate::MigrateDatabase, Sqlite, SqlitePool, pool::PoolConnection,
 };
 
@@ -17,7 +13,13 @@ pub struct Store {
 }
 
 pub struct Session {
-    connection: PoolConnection<Sqlite>,
+    connection: Mutex<PoolConnection<Sqlite>>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        println!("Session dropped and connection pool will be released");
+    }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -30,35 +32,21 @@ pub async fn create_store() -> Arc<Store> {
     } else {
         println!("Database already exists");
     }
-    let conn_opts = SqliteConnectOptions::from_str(DB_URL).unwrap()
-        .create_if_missing(true)
-        .auto_vacuum(SqliteAutoVacuum::Incremental)
-        .busy_timeout(Duration::from_secs(5))
-        .journal_mode(SqliteJournalMode::Wal)
-        .locking_mode(SqliteLockingMode::Normal)
-        .shared_cache(true)
-        .synchronous(SqliteSynchronous::Full);
-    let pool = SqlitePoolOptions::default()
-        .min_connections(1)
-        .max_connections(4)
-        .test_before_acquire(false)
-        .connect_with(conn_opts)
-        .await
-        .unwrap();
-    // let pool = SqlitePool::connect(DB_URL).await.unwrap();
+
+    let pool = SqlitePool::connect(DB_URL).await.unwrap();
     let result = sqlx::query("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY NOT NULL, name VARCHAR(250) NOT NULL);")
                     .execute(&pool).await.unwrap();
     println!("Create table result: {:?}", result);
+
     Arc::new(Store { pool: RwLock::new(Some(pool)) })
 }
 
 #[uniffi::export(async_runtime = "tokio")]
 impl Store {
     pub async fn session(&self) -> Arc<Session> {
-        println!("In count");
         let pool = self.pool.read().await;
         let conn = pool.as_ref().unwrap().acquire().await.unwrap();
-        Arc::new(Session { connection: conn })
+        Arc::new(Session { connection: Mutex::new(conn) })
     }
 
     pub async fn close(&self) {
@@ -74,8 +62,9 @@ impl Store {
 impl Session {
     pub async fn count(&self) -> u32 {
         println!("In count");
+        let mut conn = self.connection.lock().await;
         let count: u32 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-            .fetch_one(&mut self.connection)
+            .fetch_one(conn.as_mut())
             .await
             .unwrap();
         count

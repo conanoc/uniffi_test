@@ -13,13 +13,7 @@ pub struct Store {
 }
 
 pub struct Session {
-    connection: Mutex<PoolConnection<Sqlite>>,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        println!("Session dropped and connection pool will be released");
-    }
+    connection: Mutex<Option<PoolConnection<Sqlite>>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -46,7 +40,7 @@ impl Store {
     pub async fn session(&self) -> Arc<Session> {
         let pool = self.pool.read().await;
         let conn = pool.as_ref().unwrap().acquire().await.unwrap();
-        Arc::new(Session { connection: Mutex::new(conn) })
+        Arc::new(Session { connection: Mutex::new(Some(conn)) })
     }
 
     pub async fn close(&self) {
@@ -64,10 +58,15 @@ impl Session {
         println!("In count");
         let mut conn = self.connection.lock().await;
         let count: u32 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-            .fetch_one(conn.as_mut())
+            .fetch_one(conn.as_mut().unwrap())
             .await
             .unwrap();
         count
+    }
+
+    pub async fn close(&self) {
+        println!("Closing session");
+        self.connection.lock().await.take();
     }
 }
 
@@ -83,7 +82,7 @@ mod tests {
             let session = store.session().await;
             let count = session.count().await;
             println!("count: {}", count);
-            drop(session);
+            session.close().await;
             store.close().await;
         }));
     }

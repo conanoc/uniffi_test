@@ -346,6 +346,7 @@ private struct FfiConverterString: FfiConverter {
 }
 
 public protocol SessionProtocol {
+    func close() async
     func count() async -> UInt32
 }
 
@@ -361,6 +362,28 @@ public class Session: SessionProtocol {
 
     deinit {
         try! rustCall { uniffi_bug_finder_fn_free_session(pointer, $0) }
+    }
+
+    public func close() async {
+        // Suspend the function and call the scaffolding function, passing it a callback handler from
+        // `AsyncTypes.swift`
+        //
+        // Make sure to hold on to a reference to the continuation in the top-level scope so that
+        // it's not freed before the callback is invoked.
+        var continuation: CheckedContinuation<Void, Error>? = nil
+        return try! await withCheckedThrowingContinuation {
+            continuation = $0
+            try! rustCall {
+                uniffi_bug_finder_fn_method_session_close(
+                    self.pointer,
+
+                    FfiConverterForeignExecutor.lower(UniFfiForeignExecutor()),
+                    uniffiFutureCallbackHandlerVoid,
+                    &continuation,
+                    $0
+                )
+            }
+        }
     }
 
     public func count() async -> UInt32 {
@@ -700,6 +723,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_bug_finder_checksum_method_store_session() != 48256 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_bug_finder_checksum_method_session_close() != 23796 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_bug_finder_checksum_method_session_count() != 8307 {
